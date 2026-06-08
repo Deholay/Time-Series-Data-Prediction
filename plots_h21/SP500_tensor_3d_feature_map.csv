@@ -1,0 +1,17 @@
+feature_channel,feature
+1,High
+2,Open
+3,Low
+4,MA_5
+5,EMA_12
+6,MA_10
+7,EMA_26
+8,MA_20
+9,MA_60
+10,MACD_signal
+11,Volume
+12,MACD
+13,Close_to_MA_60
+14,Close_to_EMA_26
+15,STOCH_K_14
+16,Close_to_MA_20
