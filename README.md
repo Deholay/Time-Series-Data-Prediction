@@ -21,11 +21,16 @@ The workflow follows the PDF template:
 | `src/tensor_transform.py` | Converts selected features into LSTM tensors shaped as `(batch, time_steps, input_features)`. |
 | `src/LSTM.py` | Defines the PyTorch LSTM model, training loop, early stopping, and prediction helper. |
 | `src/biLSTM.py` | Defines the bidirectional LSTM model variant and training helpers. |
+| `src/nbeats_external.py` | Thin adapter around the official ServiceNow N-BEATS `models.nbeats` classes. |
+| `src/nbeats_benchmark.py` | Runs the ServiceNow N-BEATS univariate log-return benchmark and writes prediction outputs. |
+| `src/lightgbm_benchmark.py` | Runs the Microsoft LightGBM tabular lag-feature benchmark and writes prediction outputs. |
 | `src/benchmark.py` | Downloads `^IXIC`, `^GSPC`, and `^SOX`, trains models, saves predictions and benchmark metrics. |
 | `src/plot_results.py` | Uses Matplotlib to plot 3-D tensor samples and daily predicted close vs actual index close. |
 | `src/strategy_backtest.py` | Converts one-day predictions into long/short/cash trading signals and tests close-to-close plus open-to-close PnL. |
 | `LSTM_Prediction_Pipeline.ipynb` | Notebook version of the LSTM pipeline. It imports the scripts above instead of reimplementing them. |
 | `BiLSTM_Prediction_Pipeline.ipynb` | Notebook version of the bidirectional LSTM pipeline. |
+| `NBEATS_Prediction_Pipeline.ipynb` | Notebook version of the ServiceNow N-BEATS prediction pipeline. |
+| `LightGBM_Prediction_Pipeline.ipynb` | Notebook version of the Microsoft LightGBM prediction pipeline. |
 | `requirements.txt` | Python package dependencies. |
 
 ## Setup
@@ -36,10 +41,25 @@ pip install -r requirements.txt
 
 The code was verified with Python 3.13, PyTorch 2.12, pandas 3.0, and scikit-learn 1.9.
 
+N-BEATS uses the official ServiceNow Research repository interface. Clone it outside version control before running the N-BEATS notebook:
+
+```bash
+git clone https://github.com/ServiceNow/N-BEATS external/N-BEATS
+```
+
+Alternatively set `SERVICE_NOW_NBEATS_REPO` to a local checkout containing `models/nbeats.py`.
+
 ## Run The Full Benchmark
 
 ```bash
 python src/benchmark.py --output-dir outputs
+```
+
+## Run N-BEATS And LightGBM Benchmarks
+
+```bash
+python src/nbeats_benchmark.py --output-dir outputs_nbeats_h21 --horizon 21
+python src/lightgbm_benchmark.py --output-dir outputs_lightgbm_h21 --horizon 21
 ```
 
 Default settings:
@@ -114,6 +134,8 @@ Open:
 ```text
 LSTM_Prediction_Pipeline.ipynb
 BiLSTM_Prediction_Pipeline.ipynb
+NBEATS_Prediction_Pipeline.ipynb
+LightGBM_Prediction_Pipeline.ipynb
 ```
 
 The notebook runs the same pipeline by importing the project scripts. Set:

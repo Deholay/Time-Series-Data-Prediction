@@ -7,7 +7,6 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -110,26 +109,34 @@ def plot_price_predictions(index_name: str, prediction_path: Path, output_path: 
     df = pd.read_csv(prediction_path, parse_dates=["date"]).sort_values("date")
     horizon = int(df["horizon_trading_days"].iloc[0]) if "horizon_trading_days" in df.columns else 1
     horizon_label = "Next-Day" if horizon == 1 else f"{horizon}-Trading-Day Ahead"
+    model_label = str(df["model"].iloc[0]) if "model" in df.columns else "LSTM"
+    start_date = df["date"].dt.normalize().min()
+    end_date = df["date"].dt.normalize().max()
+    x_slots = (df["date"].dt.normalize() - start_date).dt.days.to_numpy()
+    all_days = pd.date_range(start_date, end_date, freq="D")
+    month_starts = pd.date_range(start_date.normalize().replace(day=1), end_date, freq="MS")
+    month_starts = month_starts[month_starts >= start_date]
+    month_slots = (month_starts - start_date).days
 
     fig, ax = plt.subplots(figsize=(11, 6), dpi=160)
     _style_axes(ax)
     ax.plot(
-        df["date"],
+        x_slots,
         df["actual_close"],
         color=PALETTE["actual"],
         linewidth=2.2,
         label="Actual index close",
     )
     ax.plot(
-        df["date"],
+        x_slots,
         df["predicted_close"],
         color=PALETTE["predicted"],
         linewidth=2.0,
         linestyle="--",
-        label="Daily LSTM predicted close",
+        label=f"Daily {model_label} predicted close",
     )
     ax.plot(
-        df["date"],
+        x_slots,
         df["naive_previous_close"],
         color=PALETTE["benchmark"],
         linewidth=1.4,
@@ -144,9 +151,14 @@ def plot_price_predictions(index_name: str, prediction_path: Path, output_path: 
         loc="left",
     )
     ax.set_ylabel("Index close")
-    ax.set_xlabel("Prediction date")
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax.set_xlabel("Prediction date (one calendar day per slot)")
+    ax.set_xlim(-0.5, len(all_days) - 0.5)
+    ax.set_xticks(month_slots)
+    ax.set_xticklabels([d.strftime("%Y-%m") for d in month_starts])
+    ax.set_xticks(np.arange(len(all_days)), minor=True)
+    ax.grid(True, axis="y", which="major", color=PALETTE["grid"], linewidth=0.8, alpha=0.8)
+    ax.grid(True, axis="x", which="minor", color=PALETTE["grid"], linewidth=0.35, alpha=0.45)
+    ax.grid(True, axis="x", which="major", color=PALETTE["grid"], linewidth=0.9, alpha=0.95)
     ax.legend(frameon=False, loc="best")
 
     rmse = np.sqrt(np.mean((df["predicted_close"] - df["actual_close"]) ** 2))
@@ -164,7 +176,6 @@ def plot_price_predictions(index_name: str, prediction_path: Path, output_path: 
         fontsize=9,
         color="#4b5563",
     )
-    fig.autofmt_xdate(rotation=0)
     fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)

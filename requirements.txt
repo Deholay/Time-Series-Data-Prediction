@@ -4,3 +4,4 @@ scikit-learn
 torch
 yfinance
 matplotlib
+lightgbm

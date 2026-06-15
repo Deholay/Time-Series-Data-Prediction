@@ -10,8 +10,15 @@ import yfinance as yf
 
 from benchmark_utils import INDEX_TICKERS, direction_accuracy, regression_metrics
 from indicator import add_technical_indicators, select_features_by_ic
-from LSTM import LSTMPredictor
 from tensor_transform import build_lstm_tensors
+
+
+def _import_lightgbm():
+    try:
+        import lightgbm as lgb
+    except ImportError as exc:
+        raise ImportError("Install Microsoft LightGBM first: pip install lightgbm") from exc
+    return lgb
 
 
 def download_index(ticker: str, start: str, end: str) -> pd.DataFrame:
@@ -22,7 +29,19 @@ def download_index(ticker: str, start: str, end: str) -> pd.DataFrame:
         df.columns = [c[0] for c in df.columns]
     return df
 
-def run_benchmark(
+
+def flatten_lag_features(X: np.ndarray, feature_names: list[str], lookback: int) -> tuple[np.ndarray, list[str]]:
+    if X.ndim != 3:
+        raise ValueError("X must be 3-D: (samples, lookback, features)")
+    flat = X.reshape(X.shape[0], -1)
+    names = []
+    for lag in range(lookback, 0, -1):
+        for feature in feature_names:
+            names.append(f"{feature}_lag_{lag}")
+    return flat, names
+
+
+def run_lightgbm_benchmark(
     name: str,
     ticker: str,
     start: str,
@@ -33,9 +52,12 @@ def run_benchmark(
     lookback: int,
     horizon: int,
     top_k: int,
-    epochs: int,
     output_dir: Path,
+    n_estimators: int = 600,
+    learning_rate: float = 0.03,
+    num_leaves: int = 31,
 ) -> dict:
+    lgb = _import_lightgbm()
     raw = download_index(ticker, start=start, end=end)
     features_df = add_technical_indicators(raw)
 
@@ -52,24 +74,44 @@ def run_benchmark(
         target_mode="log_return",
     )
 
-    model = LSTMPredictor(input_size=len(selection.features))
-    history = model.fit(tensor_data.X_train, tensor_data.y_train, epochs=epochs)
+    X_train, flat_feature_names = flatten_lag_features(tensor_data.X_train, selection.features, lookback)
+    X_test, _ = flatten_lag_features(tensor_data.X_test, selection.features, lookback)
+    y_train = tensor_data.y_train
 
-    pred_scaled = model.predict(tensor_data.X_test)
+    val_size = min(len(X_train) - 1, max(1, int(len(X_train) * 0.15)))
+    train_size = len(X_train) - val_size
+    model = lgb.LGBMRegressor(
+        objective="regression",
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        num_leaves=num_leaves,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        random_state=42,
+        n_jobs=-1,
+    )
+    model.fit(
+        X_train[:train_size],
+        y_train[:train_size],
+        eval_set=[(X_train[train_size:], y_train[train_size:])],
+        eval_metric="l2",
+        callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
+    )
+
+    pred_scaled = model.predict(X_test, num_iteration=model.best_iteration_)
     predicted_return = tensor_data.inverse_target(pred_scaled)
     actual_return = tensor_data.inverse_target(tensor_data.y_test)
     predicted = tensor_data.test_base_values * np.exp(predicted_return)
     actual = tensor_data.test_base_values * np.exp(actual_return)
-    test_dates = tensor_data.test_dates
-
     baseline = tensor_data.test_base_values
 
     prediction_df = pd.DataFrame(
         {
             "forecast_base_date": tensor_data.test_base_dates,
-            "date": test_dates,
+            "date": tensor_data.test_dates,
             "index": name,
             "ticker": ticker,
+            "model": "LightGBM",
             "horizon_trading_days": horizon,
             "actual_close": actual,
             "predicted_close": predicted,
@@ -84,33 +126,45 @@ def run_benchmark(
 
     metrics = regression_metrics(actual, predicted, baseline)
     metrics["direction_accuracy_pct"] = direction_accuracy(
-        pd.Series(actual, index=test_dates),
-        pd.Series(predicted, index=test_dates),
-        pd.Series(baseline, index=test_dates),
+        pd.Series(actual, index=tensor_data.test_dates),
+        pd.Series(predicted, index=tensor_data.test_dates),
+        pd.Series(baseline, index=tensor_data.test_dates),
     )
     metrics["samples"] = int(len(actual))
     metrics["train_samples"] = int(len(tensor_data.y_train))
+    metrics["model"] = "LightGBM"
     metrics["features"] = selection.features
-    metrics["final_train_loss"] = history.train_loss[-1]
-    metrics["final_val_loss"] = history.val_loss[-1]
+    train_pred = model.predict(X_train[:train_size], num_iteration=model.best_iteration_)
+    val_pred = model.predict(X_train[train_size:], num_iteration=model.best_iteration_)
+    metrics["final_train_loss"] = float(np.mean((train_pred - y_train[:train_size]) ** 2))
+    metrics["final_val_loss"] = float(np.mean((val_pred - y_train[train_size:]) ** 2))
+    metrics["best_iteration"] = int(model.best_iteration_ or n_estimators)
 
     selection.scores.to_csv(output_dir / f"{name}_feature_ic.csv", index=False)
+    pd.DataFrame(
+        {
+            "feature": flat_feature_names,
+            "importance": model.feature_importances_,
+        }
+    ).sort_values("importance", ascending=False).to_csv(output_dir / f"{name}_feature_importance.csv", index=False)
     raw.to_csv(output_dir / f"{name}_raw.csv")
     return {"index": name, "ticker": ticker, **metrics}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train LSTM through Dec 2025 and benchmark Jan-May 2026 forecasts.")
+    parser = argparse.ArgumentParser(description="Train Microsoft LightGBM benchmark forecasts.")
     parser.add_argument("--start", default="2010-01-01")
     parser.add_argument("--end", default="2026-06-01")
     parser.add_argument("--train-end", default="2025-12-31")
     parser.add_argument("--test-start", default="2026-01-01")
     parser.add_argument("--test-end", default="2026-05-31")
     parser.add_argument("--lookback", type=int, default=30)
-    parser.add_argument("--horizon", type=int, default=1)
+    parser.add_argument("--horizon", type=int, default=21)
     parser.add_argument("--top-k", type=int, default=16)
-    parser.add_argument("--epochs", type=int, default=80)
-    parser.add_argument("--output-dir", default="outputs")
+    parser.add_argument("--output-dir", default="outputs_lightgbm_h21")
+    parser.add_argument("--n-estimators", type=int, default=600)
+    parser.add_argument("--learning-rate", type=float, default=0.03)
+    parser.add_argument("--num-leaves", type=int, default=31)
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -118,8 +172,8 @@ def main() -> None:
 
     results = []
     for name, ticker in INDEX_TICKERS.items():
-        print(f"Running {name} ({ticker})...")
-        result = run_benchmark(
+        print(f"Running LightGBM {name} ({ticker})...")
+        result = run_lightgbm_benchmark(
             name=name,
             ticker=ticker,
             start=args.start,
@@ -130,8 +184,10 @@ def main() -> None:
             lookback=args.lookback,
             horizon=args.horizon,
             top_k=args.top_k,
-            epochs=args.epochs,
             output_dir=output_dir,
+            n_estimators=args.n_estimators,
+            learning_rate=args.learning_rate,
+            num_leaves=args.num_leaves,
         )
         results.append(result)
         print(
