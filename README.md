@@ -25,6 +25,8 @@ The workflow follows the PDF template:
 | `src/nbeats_benchmark.py` | Runs the ServiceNow N-BEATS univariate log-return benchmark and writes prediction outputs. |
 | `src/lightgbm_benchmark.py` | Runs the Microsoft LightGBM tabular lag-feature benchmark and writes prediction outputs. |
 | `src/llmtime_backend.py` | Implements LLMTIME fixed-precision digit tokenization plus Hugging Face/local/API backend hooks. |
+| `src/hybrid_bilstm_mtran_tcn.py` | Runs the BiLSTM-MTRAN-TCN hybrid sequence benchmark from section 4.1. |
+| `src/finbert_vae_gan.py` | Runs the FinBERT-VAE-GAN sentiment/denoising/generative benchmark from section 4.2. |
 | `src/benchmark.py` | Downloads `^IXIC`, `^GSPC`, and `^SOX`, trains models, saves predictions and benchmark metrics. |
 | `src/plot_results.py` | Uses Matplotlib to plot 3-D tensor samples and daily predicted close vs actual index close. |
 | `src/strategy_backtest.py` | Converts one-day predictions into long/short/cash trading signals and tests close-to-close plus open-to-close PnL. |
@@ -33,6 +35,8 @@ The workflow follows the PDF template:
 | `NBEATS_Prediction_Pipeline.ipynb` | Notebook version of the ServiceNow N-BEATS prediction pipeline. |
 | `LightGBM_Prediction_Pipeline.ipynb` | Notebook version of the Microsoft LightGBM prediction pipeline. |
 | `LLMTIME_Tokenization_Pipeline.ipynb` | Notebook for LLMTIME tokenization and local/API backend forecasting. |
+| `BiLSTM_MTRAN_TCN_Prediction_Pipeline.ipynb` | Notebook for the section 4.1 BiLSTM-MTRAN-TCN hybrid architecture. |
+| `FinBERT_VAE_GAN_Prediction_Pipeline.ipynb` | Notebook for the section 4.2 FinBERT-VAE-GAN hybrid architecture. |
 | `requirements.txt` | Python package dependencies. |
 
 ## Setup
@@ -63,9 +67,20 @@ python src/benchmark.py --output-dir outputs
 python src/nbeats_benchmark.py --output-dir outputs_nbeats_h21 --horizon 21
 python src/lightgbm_benchmark.py --output-dir outputs_lightgbm_h21 --horizon 21
 python src/llmtime_backend.py --output-dir outputs_llmtime_h1 --horizon 1 --backend hf --hf-model distilgpt2
+python src/hybrid_bilstm_mtran_tcn.py --output-dir outputs_bilstm_mtran_tcn_h21 --horizon 21
+python src/finbert_vae_gan.py --output-dir outputs_finbert_vae_gan_h21 --horizon 21
 ```
 
 The default LLMTIME model backend uses Hugging Face `transformers` through `AutoTokenizer` and `AutoModelForCausalLM`. Use `--hf-model` to choose another causal language model. Public Hugging Face models can run without a token; set `HF_TOKEN` when you need private models or higher Hub rate limits. For an API-backed LLMTIME run, set `LLMTIME_API_URL`, `LLMTIME_API_KEY`, and `LLMTIME_MODEL`, then run with `--backend api`.
+
+The FinBERT-VAE-GAN pipeline accepts optional news input with:
+
+```text
+date,text
+2025-12-31,"Example market news headline or paragraph"
+```
+
+Pass it with `--news-csv path/to/news.csv`. Without news data, the pipeline uses neutral sentiment features so the VAE/GAN market-feature path remains runnable.
 
 Default settings:
 
@@ -142,6 +157,8 @@ BiLSTM_Prediction_Pipeline.ipynb
 NBEATS_Prediction_Pipeline.ipynb
 LightGBM_Prediction_Pipeline.ipynb
 LLMTIME_Tokenization_Pipeline.ipynb
+BiLSTM_MTRAN_TCN_Prediction_Pipeline.ipynb
+FinBERT_VAE_GAN_Prediction_Pipeline.ipynb
 ```
 
 The notebook runs the same pipeline by importing the project scripts. Set:
