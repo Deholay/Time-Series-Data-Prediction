@@ -24,6 +24,7 @@ The workflow follows the PDF template:
 | `src/nbeats_external.py` | Thin adapter around the official ServiceNow N-BEATS `models.nbeats` classes. |
 | `src/nbeats_benchmark.py` | Runs the ServiceNow N-BEATS univariate log-return benchmark and writes prediction outputs. |
 | `src/lightgbm_benchmark.py` | Runs the Microsoft LightGBM tabular lag-feature benchmark and writes prediction outputs. |
+| `src/llmtime_backend.py` | Implements LLMTIME fixed-precision digit tokenization plus Hugging Face/local/API backend hooks. |
 | `src/benchmark.py` | Downloads `^IXIC`, `^GSPC`, and `^SOX`, trains models, saves predictions and benchmark metrics. |
 | `src/plot_results.py` | Uses Matplotlib to plot 3-D tensor samples and daily predicted close vs actual index close. |
 | `src/strategy_backtest.py` | Converts one-day predictions into long/short/cash trading signals and tests close-to-close plus open-to-close PnL. |
@@ -31,6 +32,7 @@ The workflow follows the PDF template:
 | `BiLSTM_Prediction_Pipeline.ipynb` | Notebook version of the bidirectional LSTM pipeline. |
 | `NBEATS_Prediction_Pipeline.ipynb` | Notebook version of the ServiceNow N-BEATS prediction pipeline. |
 | `LightGBM_Prediction_Pipeline.ipynb` | Notebook version of the Microsoft LightGBM prediction pipeline. |
+| `LLMTIME_Tokenization_Pipeline.ipynb` | Notebook for LLMTIME tokenization and local/API backend forecasting. |
 | `requirements.txt` | Python package dependencies. |
 
 ## Setup
@@ -60,7 +62,10 @@ python src/benchmark.py --output-dir outputs
 ```bash
 python src/nbeats_benchmark.py --output-dir outputs_nbeats_h21 --horizon 21
 python src/lightgbm_benchmark.py --output-dir outputs_lightgbm_h21 --horizon 21
+python src/llmtime_backend.py --output-dir outputs_llmtime_h1 --horizon 1 --backend hf --hf-model distilgpt2
 ```
+
+The default LLMTIME model backend uses Hugging Face `transformers` through `AutoTokenizer` and `AutoModelForCausalLM`. Use `--hf-model` to choose another causal language model. Public Hugging Face models can run without a token; set `HF_TOKEN` when you need private models or higher Hub rate limits. For an API-backed LLMTIME run, set `LLMTIME_API_URL`, `LLMTIME_API_KEY`, and `LLMTIME_MODEL`, then run with `--backend api`.
 
 Default settings:
 
@@ -136,6 +141,7 @@ LSTM_Prediction_Pipeline.ipynb
 BiLSTM_Prediction_Pipeline.ipynb
 NBEATS_Prediction_Pipeline.ipynb
 LightGBM_Prediction_Pipeline.ipynb
+LLMTIME_Tokenization_Pipeline.ipynb
 ```
 
 The notebook runs the same pipeline by importing the project scripts. Set:

@@ -6,6 +6,7 @@ import os
 import re
 import urllib.request
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,13 @@ class LLMTIMEScaler:
 
     def inverse_transform(self, values: np.ndarray) -> np.ndarray:
         return np.asarray(values, dtype=float) * self.scale + self.offset
+
+
+@dataclass(frozen=True)
+class HuggingFaceConfig:
+    model: str = "distilgpt2"
+    device: str = "auto"
+    max_new_tokens: int = 32
 
 
 def fit_llmtime_scaler(values: np.ndarray, precision: int = 2, alpha: float = 0.95) -> LLMTIMEScaler:
@@ -131,12 +139,64 @@ def call_openai_compatible_backend(prompt: str) -> str:
     return body["choices"][0]["message"]["content"]
 
 
+@lru_cache(maxsize=2)
+def _load_huggingface_model(model_name: str, device: str):
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as exc:
+        raise ImportError(
+            "LLMTIME Hugging Face backend requires transformers and PyTorch. "
+            "Install them with `pip install -r requirements.txt`."
+        ) from exc
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    if device == "auto":
+        resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        resolved_device = device
+
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model.to(resolved_device)
+    model.eval()
+    return tokenizer, model, resolved_device
+
+
+def call_huggingface_backend(prompt: str, hf_config: HuggingFaceConfig | None = None) -> str:
+    hf_config = hf_config or HuggingFaceConfig(
+        model=os.environ.get("LLMTIME_HF_MODEL", "distilgpt2"),
+        device=os.environ.get("LLMTIME_HF_DEVICE", "auto"),
+        max_new_tokens=int(os.environ.get("LLMTIME_HF_MAX_NEW_TOKENS", "32")),
+    )
+    tokenizer, model, device = _load_huggingface_model(hf_config.model, hf_config.device)
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    try:
+        import torch
+    except ImportError as exc:
+        raise ImportError("PyTorch is required for Hugging Face generation.") from exc
+
+    with torch.no_grad():
+        generated = model.generate(
+            **inputs,
+            max_new_tokens=hf_config.max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    new_tokens = generated[0][inputs["input_ids"].shape[1] :]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+
 def predict_llmtime_value(
     history_values: np.ndarray,
     scaler: LLMTIMEScaler,
     horizon: int,
     config: LLMTIMEConfig,
     backend: str = "local",
+    hf_config: HuggingFaceConfig | None = None,
 ) -> tuple[float, str]:
     if backend == "local":
         predicted = local_trend_backend(history_values, horizon=horizon)
@@ -149,7 +209,14 @@ def predict_llmtime_value(
         if not decoded:
             raise ValueError(f"Could not decode LLMTIME API completion: {completion!r}")
         return decoded[0], prompt
-    raise ValueError("backend must be 'local' or 'api'")
+    if backend == "hf":
+        prompt = build_llmtime_prompt(history_values, scaler=scaler, horizon=horizon, config=config)
+        completion = call_huggingface_backend(prompt, hf_config=hf_config)
+        decoded = decode_llmtime_text(completion, scaler=scaler, style=config.style)
+        if not decoded:
+            raise ValueError(f"Could not decode LLMTIME Hugging Face completion: {completion!r}")
+        return decoded[0], prompt
+    raise ValueError("backend must be 'local', 'api', or 'hf'")
 
 
 def download_index(ticker: str, start: str, end: str) -> pd.DataFrame:
@@ -172,6 +239,7 @@ def run_llmtime_benchmark(
     output_dir: Path,
     backend: str = "local",
     config: LLMTIMEConfig | None = None,
+    hf_config: HuggingFaceConfig | None = None,
 ) -> dict:
     config = config or LLMTIMEConfig()
     raw = download_index(ticker, start=start, end=end)
@@ -197,6 +265,7 @@ def run_llmtime_benchmark(
             horizon=horizon,
             config=config,
             backend=backend,
+            hf_config=hf_config,
         )
         if not first_prompt:
             first_prompt = prompt
@@ -243,6 +312,13 @@ def run_llmtime_benchmark(
     metrics["tokenizer"] = config.style
     metrics["precision"] = config.precision
     metrics["alpha"] = config.alpha
+    if backend == "hf":
+        resolved_hf = hf_config or HuggingFaceConfig(
+            model=os.environ.get("LLMTIME_HF_MODEL", "distilgpt2"),
+            device=os.environ.get("LLMTIME_HF_DEVICE", "auto"),
+            max_new_tokens=int(os.environ.get("LLMTIME_HF_MAX_NEW_TOKENS", "32")),
+        )
+        metrics["hf_model"] = resolved_hf.model
     return {"index": name, "ticker": ticker, **metrics}
 
 
@@ -256,15 +332,23 @@ def main() -> None:
     parser.add_argument("--lookback", type=int, default=30)
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--output-dir", default="outputs_llmtime_h1")
-    parser.add_argument("--backend", choices=["local", "api"], default="local")
+    parser.add_argument("--backend", choices=["local", "api", "hf"], default="hf")
     parser.add_argument("--style", choices=["gpt", "llama"], default="gpt")
     parser.add_argument("--precision", type=int, default=2)
     parser.add_argument("--alpha", type=float, default=0.95)
+    parser.add_argument("--hf-model", default=os.environ.get("LLMTIME_HF_MODEL", "distilgpt2"))
+    parser.add_argument("--hf-device", default=os.environ.get("LLMTIME_HF_DEVICE", "auto"))
+    parser.add_argument("--hf-max-new-tokens", type=int, default=int(os.environ.get("LLMTIME_HF_MAX_NEW_TOKENS", "32")))
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     config = LLMTIMEConfig(precision=args.precision, alpha=args.alpha, style=args.style)
+    hf_config = HuggingFaceConfig(
+        model=args.hf_model,
+        device=args.hf_device,
+        max_new_tokens=args.hf_max_new_tokens,
+    )
 
     results = []
     for name, ticker in INDEX_TICKERS.items():
@@ -282,6 +366,7 @@ def main() -> None:
             output_dir=output_dir,
             backend=args.backend,
             config=config,
+            hf_config=hf_config if args.backend == "hf" else None,
         )
         results.append(result)
         print(
