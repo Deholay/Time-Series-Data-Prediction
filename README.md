@@ -17,13 +17,15 @@ The workflow follows the PDF template:
 
 | File | Purpose |
 |---|---|
-| `indicator.py` | Calculates MA, EMA, MACD, RSI, Stochastic %K, return, range, and volatility features. Also ranks features by Pearson IC. |
-| `tensor_transform.py` | Converts selected features into LSTM tensors shaped as `(batch, time_steps, input_features)`. |
-| `LSTM.py` | Defines the PyTorch LSTM model, training loop, early stopping, and prediction helper. |
-| `benchmark.py` | Downloads `^IXIC`, `^GSPC`, and `^SOX`, trains models, saves predictions and benchmark metrics. |
-| `plot_results.py` | Uses Matplotlib to plot 3-D tensor samples and daily predicted close vs actual index close. |
-| `strategy_backtest.py` | Converts one-day predictions into long/short/cash trading signals and tests close-to-close plus open-to-close PnL. |
-| `TS_Prediction_Pipeline.ipynb` | Notebook version of the full pipeline. It imports the scripts above instead of reimplementing them. |
+| `src/indicator.py` | Calculates MA, EMA, MACD, RSI, Stochastic %K, return, range, and volatility features. Also ranks features by Pearson IC. |
+| `src/tensor_transform.py` | Converts selected features into LSTM tensors shaped as `(batch, time_steps, input_features)`. |
+| `src/LSTM.py` | Defines the PyTorch LSTM model, training loop, early stopping, and prediction helper. |
+| `src/biLSTM.py` | Defines the bidirectional LSTM model variant and training helpers. |
+| `src/benchmark.py` | Downloads `^IXIC`, `^GSPC`, and `^SOX`, trains models, saves predictions and benchmark metrics. |
+| `src/plot_results.py` | Uses Matplotlib to plot 3-D tensor samples and daily predicted close vs actual index close. |
+| `src/strategy_backtest.py` | Converts one-day predictions into long/short/cash trading signals and tests close-to-close plus open-to-close PnL. |
+| `LSTM_Prediction_Pipeline.ipynb` | Notebook version of the LSTM pipeline. It imports the scripts above instead of reimplementing them. |
+| `BiLSTM_Prediction_Pipeline.ipynb` | Notebook version of the bidirectional LSTM pipeline. |
 | `requirements.txt` | Python package dependencies. |
 
 ## Setup
@@ -37,7 +39,7 @@ The code was verified with Python 3.13, PyTorch 2.12, pandas 3.0, and scikit-lea
 ## Run The Full Benchmark
 
 ```bash
-python benchmark.py --output-dir outputs
+python src/benchmark.py --output-dir outputs
 ```
 
 Default settings:
@@ -66,8 +68,8 @@ This is more stable than directly forecasting the raw close-price level.
 Use `--horizon 21` to predict about one trading month ahead while still updating the input window every trading day:
 
 ```bash
-python benchmark.py --horizon 21 --output-dir outputs_h21
-python plot_results.py --outputs-dir outputs_h21 --plots-dir plots_h21 --horizon 21
+python src/benchmark.py --horizon 21 --output-dir outputs_h21
+python src/plot_results.py --outputs-dir outputs_h21 --plots-dir plots_h21 --horizon 21
 ```
 
 For example, the first 2026 prediction row uses `forecast_base_date = 2025-12-02` to predict the target close on `2026-01-02`. The next row uses `2025-12-03` to predict `2026-01-05`, so the forecast is still daily rolling.
@@ -75,7 +77,7 @@ For example, the first 2026 prediction row uses `forecast_base_date = 2025-12-02
 ## Generate Plots
 
 ```bash
-python plot_results.py --outputs-dir outputs --plots-dir plots
+python src/plot_results.py --outputs-dir outputs --plots-dir plots
 ```
 
 ## Run Single-Day Strategy Backtest
@@ -83,8 +85,8 @@ python plot_results.py --outputs-dir outputs --plots-dir plots
 The strategy test uses `horizon=1` prediction CSVs. Signals are generated after the base-day close, then the more tradable PnL path enters at the next day's open and exits at that day's close.
 
 ```bash
-python benchmark.py --horizon 1 --output-dir outputs
-python strategy_backtest.py --outputs-dir outputs --backtest-dir backtests_h1 --threshold-bps 0 5 10 15 20 50 --cost-bps 2 --plot-threshold-bps 10
+python src/benchmark.py --horizon 1 --output-dir outputs
+python src/strategy_backtest.py --outputs-dir outputs --backtest-dir backtests_h1 --threshold-bps 0 5 10 15 20 50 --cost-bps 2 --plot-threshold-bps 10
 ```
 
 Signal rule:
@@ -110,7 +112,8 @@ Generated plot types:
 Open:
 
 ```text
-TS_Prediction_Pipeline.ipynb
+LSTM_Prediction_Pipeline.ipynb
+BiLSTM_Prediction_Pipeline.ipynb
 ```
 
 The notebook runs the same pipeline by importing the project scripts. Set:
@@ -161,7 +164,7 @@ Metrics:
 
 ### Indicator Layer
 
-`indicator.py` adds:
+`src/indicator.py` adds:
 
 - `MA_5`, `MA_10`, `MA_20`, `MA_60`
 - `EMA_12`, `EMA_26`
@@ -174,7 +177,7 @@ Feature selection is performed only on the training period to avoid leakage.
 
 ### Tensor Layer
 
-`tensor_transform.py` creates:
+`src/tensor_transform.py` creates:
 
 ```text
 X_train: (training_samples, lookback, selected_features)
@@ -187,7 +190,7 @@ Feature and target scalers are fit on training data only.
 
 ### Model Layer
 
-`LSTM.py` uses:
+`src/LSTM.py` uses:
 
 - PyTorch `nn.LSTM`
 - layer normalization
@@ -201,6 +204,6 @@ Feature and target scalers are fit on training data only.
 
 ```bash
 pip install -r requirements.txt
-python benchmark.py --output-dir outputs
-python plot_results.py --outputs-dir outputs --plots-dir plots
+python src/benchmark.py --output-dir outputs
+python src/plot_results.py --outputs-dir outputs --plots-dir plots
 ```
